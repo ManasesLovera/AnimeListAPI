@@ -91,6 +91,12 @@ app.MapGet("/animes", (ApplicationDbContext context) =>
 })
     .RequireAuthorization();
 
+app.MapGet("/animesByUser", (ApplicationDbContext context, ClaimsPrincipal user) =>
+{
+    return context.UserAnimeLists.Where(ual => ual.UserId.ToString() == user.FindFirstValue(ClaimTypes.NameIdentifier)).ToList();
+})
+    .RequireAuthorization();
+
 app.MapGet("/api/animes/{id:int}", async ([FromRoute] int id, ApplicationDbContext context, ClaimsPrincipal user) =>
 {
     var userId = int.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
@@ -104,16 +110,36 @@ app.MapGet("/api/animes/{id:int}", async ([FromRoute] int id, ApplicationDbConte
     .WithName("GetAnime")
     .RequireAuthorization();
 
-//app.MapPut();
-
-app.MapDelete("/api/animes/{id:int}", async ([FromRoute] int id, ApplicationDbContext context) =>
+app.MapPut("/api/anime/changeStatus", async (ChangeStatusDto changeStatusDto,ApplicationDbContext context, ClaimsPrincipal user) =>
 {
-    var anime = await context.Animes.SingleOrDefaultAsync(a => a.Id == id);
+    if (!String.IsNullOrEmpty(changeStatusDto.Status))
+    {
+        return Results.BadRequest();
+    }
+    int userId = int.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
+    UserAnimeList? anime = await context.UserAnimeLists.SingleOrDefaultAsync(a => a.AnimeId == changeStatusDto.AnimeId && a.UserId == userId);
     if (anime == null)
     {
         return Results.NotFound();
     }
-    context.Animes.Remove(anime);
+    anime!.Status = changeStatusDto.Status;
+    await context.SaveChangesAsync();
+    return Results.NoContent();
+})
+    .RequireAuthorization()
+    .Produces(404)
+    .Produces(400)
+    .Produces(204);
+
+app.MapDelete("/api/animes/{id:int}", async ([FromRoute] int id, ApplicationDbContext context, ClaimsPrincipal user) =>
+{
+    var userId = int.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
+    var anime = await context.UserAnimeLists.SingleOrDefaultAsync(a => a.Id == id && a.UserId == userId);
+    if (anime == null)
+    {
+        return Results.NotFound();
+    }
+    context.UserAnimeLists.Remove(anime);
     await context.SaveChangesAsync();
     return Results.Ok("Anime deleted");
 });
@@ -133,7 +159,7 @@ app.MapPost("/animes", async (AnimeDto animeDto, ApplicationDbContext context) =
 
 app.MapPost("/user-anime-list", async (UserAnimeListDto userAnimeListDto, ApplicationDbContext context, ClaimsPrincipal user) =>
 {
-    var username = user.Identity!.Name;
+    string username = user.FindFirstValue(ClaimTypes.Name)!;
     var dbUser = await context.Users.SingleOrDefaultAsync(u => u.Username == username);
     if (dbUser == null)
     {
